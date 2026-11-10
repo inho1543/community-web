@@ -125,7 +125,15 @@ def check_csrf():
             request.headers.get("X-CSRF-Token", ""), session.get("csrf", "")
         ):
             # Registration/login bootstrap: a CSRF token is initialized by GET /api/auth/me.
-            return error("보안 확인이 필요합니다. 페이지를 새로고침해 주세요.", 403)
+            return jsonify({"error": "인증 정보가 변경되었습니다. 다시 시도해 주세요.", "code": "CSRF_STALE"}), 403
+
+
+@app.after_request
+def disable_auth_cache(response):
+    if request.path.startswith("/api/auth/"):
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Vary"] = "Cookie"
+    return response
 
 
 @app.get("/api/auth/me")
@@ -170,7 +178,9 @@ def login():
     data = parse_json()
     username = data.get("username", "")
     password = data.get("password", "")
-    row = get_db().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone() if isinstance(username, str) else None
+    # 로그인은 비밀번호만이 아닌 정확한 아이디와 비밀번호 쌍으로 검증한다.
+    username = username.strip() if isinstance(username, str) else ""
+    row = get_db().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone() if username else None
     if row is None or not isinstance(password, str) or not check_password_hash(row["password_hash"], password):
         return error("아이디 또는 비밀번호가 올바르지 않습니다.", 401)
     session.clear()
